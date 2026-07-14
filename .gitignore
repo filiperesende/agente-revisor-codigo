@@ -1,0 +1,24 @@
+# Segredos e ambiente — NUNCA versionar
+.env
+*.env
+!.env.example
+
+# Ambiente virtual Python
+.venv/
+venv/
+env/
+
+# Cache do Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Relatórios gerados em tempo de execução
+reports/
+
+# Arquivos de sistema / editor
+.DS_Store
+.idea/
+.vscode/
+
