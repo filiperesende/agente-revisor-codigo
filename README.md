@@ -189,7 +189,7 @@ agente-revisor-codigo/
 │   └── test_tools.py        # testes das ferramentas
 ├── docs/
 │   ├── prompts.md           # prompts usados no desenvolvimento
-│   └── apresentacao.md      # roteiro dos 2 slides
+│   └── apresentacao.pdf     # apresentação (slides)
 └── reports/                 # relatórios gerados (não versionado)
 ```
 
