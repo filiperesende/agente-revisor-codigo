@@ -114,6 +114,17 @@ python run_review.py examples/exemplo_com_bugs.py
 > Sem a chave do Gemini, o agente roda em **modo mock** (análise por
 > heurísticas), então funciona mesmo offline. Com a chave, usa o Gemini real.
 
+## Testes
+
+Os testes cobrem as validações (`src/validation.py`) e as ferramentas
+(`src/tools.py`), incluindo os limites de segurança (extensão, tamanho e
+proteção contra *path traversal*). Não dependem de chave de API nem de rede.
+
+```bash
+# com o ambiente virtual ativo e as dependências instaladas
+pytest
+```
+
 ## Exemplo de entrada
 
 `examples/exemplo_com_bugs.py` (trecho):
@@ -158,6 +169,7 @@ descrição e sugestão, ordenado da maior para a menor severidade.
 agente-revisor-codigo/
 ├── run_review.py            # CLI: ponto de entrada
 ├── requirements.txt
+├── conftest.py              # permite os testes importarem o pacote src
 ├── .env.example             # nomes das variáveis (sem valores)
 ├── .gitignore               # ignora .env, .venv, reports/
 ├── README.md
@@ -172,9 +184,12 @@ agente-revisor-codigo/
 │       └── revisao_codigo.md
 ├── examples/
 │   └── exemplo_com_bugs.py  # entrada de demonstração
+├── tests/
+│   ├── test_validation.py   # testes das validações
+│   └── test_tools.py        # testes das ferramentas
 ├── docs/
 │   ├── prompts.md           # prompts usados no desenvolvimento
-│   └── apresentacao.md      # roteiro dos 2 slides
+│   └── apresentacao.pdf     # apresentação (slides)
 └── reports/                 # relatórios gerados (não versionado)
 ```
 
