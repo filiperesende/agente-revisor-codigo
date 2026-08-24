@@ -5,7 +5,10 @@ Cada função abaixo é um nó do LangGraph. Recebe o estado atual e retorna um
 dicionário com os campos que devem ser atualizados no estado compartilhado.
 
 Fluxo:
-    validar_entrada -> preparar_contexto -> analisar_codigo
+    validar_entrada -> preparar_contexto
+                    -> [analisar_com_ia | analisar_estatico]  (paralelo)
+                    -> consolidar_achados                     (fan-in)
+                    -> [priorizar_achados]                    (condicional: risco alto)
                     -> gerar_relatorio -> escrever_relatorio
 """
 
@@ -14,7 +17,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from . import llm
+from . import analise_estatica, llm
 from .state import ReviewState
 from .tools import (
     FerramentaError,
@@ -78,27 +81,96 @@ def preparar_contexto(state: ReviewState) -> dict:
     }
 
 
-def analisar_codigo(state: ReviewState) -> dict:
+def analisar_com_ia(state: ReviewState) -> dict:
     """
-    Nó 3 — Análise pelo agente (chamada ao LLM Gemini ou mock).
+    Nó 3a (ramo paralelo) — Análise dirigida pelo modelo (Gemini ou mock).
 
-    Envia o código e o contexto ao motor de análise e valida/normaliza a
-    saída antes de guardá-la no estado.
+    Representa a parte de "decisão do modelo" do fluxo. Escreve apenas em
+    campos exclusivos deste nó (`achados_ia`, `motor_analise`) para permitir
+    execução paralela sem conflito de atualização no estado compartilhado.
     """
     codigo = state["codigo_fonte"]
-    contexto = dict(state.get("contexto", {}))
+    contexto = state.get("contexto", {})
 
     brutos, motor = llm.analisar_codigo(codigo, contexto)
     achados = normalizar_achados(brutos)
 
-    # Atualiza a memória com o resultado da análise.
-    contexto["motor_analise"] = motor
-    contexto["total_achados"] = len(achados)
+    return {
+        "achados_ia": achados,
+        "motor_analise": motor,
+        "logs": [f"[analisar_com_ia] motor={motor}, achados={len(achados)}"],
+    }
+
+
+def analisar_estatico(state: ReviewState) -> dict:
+    """
+    Nó 3b (ramo paralelo) — Análise estática determinística (sem LLM).
+
+    Representa a parte de "regras determinísticas" do fluxo. Roda em paralelo
+    com `analisar_com_ia` e escreve apenas em `achados_estatica`.
+    """
+    codigo = state["codigo_fonte"]
+    achados = normalizar_achados(analise_estatica.analisar(codigo))
 
     return {
-        "achados": achados,
+        "achados_estatica": achados,
+        "logs": [f"[analisar_estatico] regras determinísticas, achados={len(achados)}"],
+    }
+
+
+def consolidar_achados(state: ReviewState) -> dict:
+    """
+    Nó 4 (fan-in) — Une os resultados dos dois ramos paralelos.
+
+    Junta os achados da IA e da análise estática, remove duplicatas e atualiza
+    a memória (contexto) com os totais consolidados. É aqui que os dois ramos
+    convergem antes da decisão de priorização.
+    """
+    contexto = dict(state.get("contexto", {}))
+    ia = state.get("achados_ia", [])
+    estatica = state.get("achados_estatica", [])
+
+    consolidados = _mesclar_sem_duplicatas(ia + estatica)
+    por_sev = {
+        s: sum(1 for a in consolidados if a["severidade"] == s)
+        for s in ("alta", "media", "baixa")
+    }
+
+    contexto["motor_analise"] = state.get("motor_analise", "desconhecido")
+    contexto["total_achados"] = len(consolidados)
+    contexto["achados_ia"] = len(ia)
+    contexto["achados_estatica"] = len(estatica)
+    contexto["por_severidade"] = por_sev
+
+    return {
+        "achados": consolidados,
         "contexto": contexto,
-        "logs": [f"[analisar_codigo] motor={motor}, achados={len(achados)}"],
+        "logs": [
+            f"[consolidar_achados] ia={len(ia)}, estatica={len(estatica)}, "
+            f"consolidados={len(consolidados)} (alta={por_sev['alta']})"
+        ],
+    }
+
+
+def priorizar_achados(state: ReviewState) -> dict:
+    """
+    Nó 5 (condicional) — Priorização acionada quando há risco alto.
+
+    Só é executado pela aresta condicional quando existe pelo menos um achado
+    de severidade alta. Marca o nível de risco da execução na memória, o que
+    orienta o relatório e prepara o gate de aprovação humana (Fase C).
+    """
+    contexto = dict(state.get("contexto", {}))
+    achados = state.get("achados", [])
+    alta = [a for a in achados if a["severidade"] == "alta"]
+
+    contexto["nivel_risco"] = "alto"
+    contexto["requer_atencao"] = True
+    contexto["achados_prioritarios"] = len(alta)
+
+    return {
+        "contexto": contexto,
+        "logs": [f"[priorizar_achados] risco ALTO: {len(alta)} achado(s) prioritário(s)"],
     }
 
 
@@ -114,6 +186,7 @@ def gerar_relatorio(state: ReviewState) -> dict:
 
     total = len(achados_ordenados)
     por_sev = {s: sum(1 for a in achados if a["severidade"] == s) for s in ("alta", "media", "baixa")}
+    nivel_risco = contexto.get("nivel_risco", "normal")
 
     linhas = [
         "# Relatório de Revisão de Código",
@@ -122,16 +195,29 @@ def gerar_relatorio(state: ReviewState) -> dict:
         f"- **Linguagem:** {contexto.get('linguagem', 'Desconhecida')}",
         f"- **Linhas analisadas:** {contexto.get('total_linhas', 0)}",
         f"- **Motor de análise:** {contexto.get('motor_analise', 'desconhecido')}",
+        f"- **Nível de risco:** {nivel_risco.upper()}",
         f"- **Data:** {contexto.get('iniciado_em', '')}",
         "",
+    ]
+
+    if nivel_risco == "alto":
+        linhas.extend([
+            "> ⚠️ **Atenção:** foram encontrados problemas de severidade alta. "
+            "Recomenda-se revisão humana antes de prosseguir.",
+            "",
+        ])
+
+    linhas.extend([
         "## Resumo",
         "",
         f"- Total de problemas encontrados: **{total}**",
         f"- Severidade alta: {por_sev['alta']} | média: {por_sev['media']} | baixa: {por_sev['baixa']}",
+        f"- Origem: IA={contexto.get('achados_ia', 0)} | "
+        f"estática={contexto.get('achados_estatica', 0)}",
         "",
         "## Detalhes",
         "",
-    ]
+    ])
 
     if total == 0:
         linhas.append("Nenhum problema encontrado pelo agente. ✅")
@@ -175,9 +261,39 @@ def escrever_relatorio_node(state: ReviewState) -> dict:
 
 def rota_apos_validacao(state: ReviewState) -> str:
     """
-    Aresta condicional: decide o próximo passo após a validação.
+    Aresta condicional 1: decide o próximo passo após a validação.
 
     Retorna "continuar" se a entrada é válida, ou "encerrar" caso contrário.
     É aqui que o grafo toma a decisão de seguir ou abortar o fluxo.
     """
     return "continuar" if state.get("valido") else "encerrar"
+
+
+def rota_apos_consolidacao(state: ReviewState) -> str:
+    """
+    Aresta condicional 2: decide se a execução precisa de priorização.
+
+    Se houver ao menos um achado de severidade alta, o fluxo passa pelo nó de
+    priorização (que marca o risco). Caso contrário, segue direto ao relatório.
+    """
+    achados = state.get("achados", [])
+    tem_risco_alto = any(a["severidade"] == "alta" for a in achados)
+    return "priorizar" if tem_risco_alto else "seguir"
+
+
+def _mesclar_sem_duplicatas(achados: list) -> list:
+    """
+    Remove achados duplicados vindos dos dois ramos de análise.
+
+    Considera duplicata quando categoria, linha e descrição coincidem — caso
+    em que a IA e a análise estática apontaram o mesmo problema.
+    """
+    vistos: set[tuple] = set()
+    unicos = []
+    for a in achados:
+        chave = (a.get("categoria"), a.get("linha"), a.get("descricao"))
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        unicos.append(a)
+    return unicos
