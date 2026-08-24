@@ -43,7 +43,14 @@ class ReviewState(TypedDict, total=False):
     # --- Contexto / memória da execução ---
     contexto: dict
 
-    # --- Resultado da análise ---
+    # --- Resultado dos ramos paralelos de análise ---
+    # Cada campo é escrito por um único nó (single-writer), evitando conflito
+    # de atualização concorrente durante a paralelização do grafo.
+    achados_ia: list[Achado]        # produzidos pelo LLM (Gemini ou mock)
+    achados_estatica: list[Achado]  # produzidos pela análise determinística
+    motor_analise: str              # motor efetivamente usado pela IA
+
+    # --- Resultado consolidado (fan-in) ---
     achados: list[Achado]
 
     # --- Saída final ---
