@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from . import analise_estatica, llm, notificacao
+from . import analise_estatica, llm, notificacao, policy
 from .state import ReviewState
 from .tools import (
     FerramentaError,
@@ -259,18 +259,11 @@ def escrever_relatorio_node(state: ReviewState) -> dict:
     }
 
 
-def notificar_node(state: ReviewState) -> dict:
-    """
-    Nó 6 — Notificação externa (uso da tool de webhook do Discord).
-
-    Monta o payload a partir do contexto/achados e chama a tool de notificação.
-    Se o webhook não estiver configurado, a etapa é pulada sem erro. Nenhuma
-    exceção da integração externa interrompe o fluxo do agente.
-    """
+def montar_payload_notificacao(state: ReviewState) -> dict:
+    """Monta o payload de notificação a partir do estado (reutilizado pela CLI)."""
     contexto = state.get("contexto", {})
     achados = state.get("achados", [])
-
-    payload = {
+    return {
         "arquivo": contexto.get("caminho_arquivo") or state.get("caminho_arquivo", ""),
         "linguagem": contexto.get("linguagem", "Desconhecida"),
         "total_achados": contexto.get("total_achados", len(achados)),
@@ -279,6 +272,40 @@ def notificar_node(state: ReviewState) -> dict:
         "caminho_relatorio": state.get("caminho_relatorio"),
     }
 
+
+def notificar_node(state: ReviewState) -> dict:
+    """
+    Nó 6 — Notificação externa com gate de autonomia (uso da tool de webhook).
+
+    Consulta a política de autonomia antes de enviar:
+      - webhook não configurado  -> etapa pulada;
+      - ação exige aprovação e ela não foi concedida -> retorna
+        "aguardando_aprovacao" SEM enviar (o gate humano acontece na CLI);
+      - caso contrário -> envia normalmente.
+
+    Nenhuma exceção da integração externa interrompe o fluxo do agente.
+    """
+    contexto = state.get("contexto", {})
+
+    if not notificacao.esta_configurado():
+        return {
+            "notificacao": {"status": "pulado", "motivo": "DISCORD_WEBHOOK_URL não configurada."},
+            "logs": ["[notificar] webhook não configurado, etapa pulada"],
+        }
+
+    precisa_aprovacao = policy.requer_aprovacao("notificacao_externa", contexto)
+    aprovado = state.get("aprovacao_concedida", False)
+
+    if precisa_aprovacao and not aprovado:
+        return {
+            "notificacao": {
+                "status": "aguardando_aprovacao",
+                "motivo": "Risco alto: envio externo exige aprovação humana.",
+            },
+            "logs": ["[notificar] gate de autonomia: aguardando aprovação humana (risco alto)"],
+        }
+
+    payload = montar_payload_notificacao(state)
     resultado = notificacao.enviar_notificacao(payload)
     return {
         "notificacao": resultado,
