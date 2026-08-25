@@ -19,6 +19,8 @@ from .nodes import (
     notificar_node,
     preparar_contexto,
     priorizar_achados,
+    recuperar_memoria,
+    registrar_memoria,
     rota_apos_consolidacao,
     rota_apos_validacao,
     validar_entrada,
@@ -33,25 +35,28 @@ def construir_agente():
         START
           -> validar_entrada
              --(condicional 1)--> preparar_contexto | END
-          preparar_contexto
+          preparar_contexto -> recuperar_memoria
+          recuperar_memoria
              --> analisar_com_ia     ┐  (execução paralela)
              --> analisar_estatico    ┘
           analisar_com_ia / analisar_estatico
              --> consolidar_achados   (fan-in)
              --(condicional 2)--> priorizar_achados | gerar_relatorio
-          gerar_relatorio -> escrever_relatorio -> notificar -> END
+          gerar_relatorio -> escrever_relatorio -> registrar_memoria -> notificar -> END
     """
     grafo = StateGraph(ReviewState)
 
     # --- Nós (etapas principais do processo) ---
     grafo.add_node("validar_entrada", validar_entrada)
     grafo.add_node("preparar_contexto", preparar_contexto)
+    grafo.add_node("recuperar_memoria", recuperar_memoria)
     grafo.add_node("analisar_com_ia", analisar_com_ia)
     grafo.add_node("analisar_estatico", analisar_estatico)
     grafo.add_node("consolidar_achados", consolidar_achados)
     grafo.add_node("priorizar_achados", priorizar_achados)
     grafo.add_node("gerar_relatorio", gerar_relatorio)
     grafo.add_node("escrever_relatorio", escrever_relatorio_node)
+    grafo.add_node("registrar_memoria", registrar_memoria)
     grafo.add_node("notificar", notificar_node)
 
     # --- Conexões (fluxo do agente) ---
@@ -67,9 +72,12 @@ def construir_agente():
         },
     )
 
+    # Recuperação de memória antes da análise (carrega revisão anterior).
+    grafo.add_edge("preparar_contexto", "recuperar_memoria")
+
     # Paralelização: os dois ramos de análise partem do mesmo nó e rodam juntos.
-    grafo.add_edge("preparar_contexto", "analisar_com_ia")
-    grafo.add_edge("preparar_contexto", "analisar_estatico")
+    grafo.add_edge("recuperar_memoria", "analisar_com_ia")
+    grafo.add_edge("recuperar_memoria", "analisar_estatico")
 
     # Fan-in: consolidar só executa quando os dois ramos terminam.
     grafo.add_edge("analisar_com_ia", "consolidar_achados")
@@ -87,7 +95,8 @@ def construir_agente():
 
     grafo.add_edge("priorizar_achados", "gerar_relatorio")
     grafo.add_edge("gerar_relatorio", "escrever_relatorio")
-    grafo.add_edge("escrever_relatorio", "notificar")
+    grafo.add_edge("escrever_relatorio", "registrar_memoria")
+    grafo.add_edge("registrar_memoria", "notificar")
     grafo.add_edge("notificar", END)
 
     return grafo.compile()
