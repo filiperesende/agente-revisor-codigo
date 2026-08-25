@@ -45,9 +45,15 @@ def main(argv: list[str]) -> int:
 
     contexto = estado.get("contexto", {})
     achados = estado.get("achados", [])
+    nivel_risco = contexto.get("nivel_risco", "normal")
     print(f"📄 Linguagem: {contexto.get('linguagem')}")
     print(f"📏 Linhas: {contexto.get('total_linhas')}")
-    print(f"🐛 Problemas encontrados: {len(achados)}")
+    print(
+        f"🐛 Problemas encontrados: {len(achados)} "
+        f"(IA={contexto.get('achados_ia', 0)}, estática={contexto.get('achados_estatica', 0)})"
+    )
+    if nivel_risco == "alto":
+        print("⚠️  Nível de risco: ALTO — recomenda-se revisão humana.")
 
     for a in achados:
         print(f"   [{a['severidade'].upper()}] linha {a['linha']}: {a['descricao']}")
