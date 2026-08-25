@@ -16,6 +16,7 @@ from .nodes import (
     consolidar_achados,
     escrever_relatorio_node,
     gerar_relatorio,
+    notificar_node,
     preparar_contexto,
     priorizar_achados,
     rota_apos_consolidacao,
@@ -38,7 +39,7 @@ def construir_agente():
           analisar_com_ia / analisar_estatico
              --> consolidar_achados   (fan-in)
              --(condicional 2)--> priorizar_achados | gerar_relatorio
-          gerar_relatorio -> escrever_relatorio -> END
+          gerar_relatorio -> escrever_relatorio -> notificar -> END
     """
     grafo = StateGraph(ReviewState)
 
@@ -51,6 +52,7 @@ def construir_agente():
     grafo.add_node("priorizar_achados", priorizar_achados)
     grafo.add_node("gerar_relatorio", gerar_relatorio)
     grafo.add_node("escrever_relatorio", escrever_relatorio_node)
+    grafo.add_node("notificar", notificar_node)
 
     # --- Conexões (fluxo do agente) ---
     grafo.add_edge(START, "validar_entrada")
@@ -85,7 +87,8 @@ def construir_agente():
 
     grafo.add_edge("priorizar_achados", "gerar_relatorio")
     grafo.add_edge("gerar_relatorio", "escrever_relatorio")
-    grafo.add_edge("escrever_relatorio", END)
+    grafo.add_edge("escrever_relatorio", "notificar")
+    grafo.add_edge("notificar", END)
 
     return grafo.compile()
 

@@ -61,6 +61,13 @@ def main(argv: list[str]) -> int:
     if estado.get("caminho_relatorio"):
         print(f"\n✅ Relatório salvo em: {estado['caminho_relatorio']}")
 
+    notif = estado.get("notificacao")
+    if notif:
+        icones = {"enviado": "📣", "pulado": "⏭️", "falha": "⚠️", "invalido": "⛔"}
+        icone = icones.get(notif.get("status"), "•")
+        detalhe = notif.get("motivo") or f"tentativas={notif.get('tentativas', 1)}"
+        print(f"{icone} Notificação Discord: {notif.get('status')} ({detalhe})")
+
     return 0
 
 

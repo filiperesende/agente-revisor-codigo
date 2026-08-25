@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from . import analise_estatica, llm
+from . import analise_estatica, llm, notificacao
 from .state import ReviewState
 from .tools import (
     FerramentaError,
@@ -256,6 +256,33 @@ def escrever_relatorio_node(state: ReviewState) -> dict:
     return {
         "caminho_relatorio": destino,
         "logs": [f"[escrever_relatorio] relatório salvo em {destino}"],
+    }
+
+
+def notificar_node(state: ReviewState) -> dict:
+    """
+    Nó 6 — Notificação externa (uso da tool de webhook do Discord).
+
+    Monta o payload a partir do contexto/achados e chama a tool de notificação.
+    Se o webhook não estiver configurado, a etapa é pulada sem erro. Nenhuma
+    exceção da integração externa interrompe o fluxo do agente.
+    """
+    contexto = state.get("contexto", {})
+    achados = state.get("achados", [])
+
+    payload = {
+        "arquivo": contexto.get("caminho_arquivo") or state.get("caminho_arquivo", ""),
+        "linguagem": contexto.get("linguagem", "Desconhecida"),
+        "total_achados": contexto.get("total_achados", len(achados)),
+        "por_severidade": contexto.get("por_severidade", {}),
+        "nivel_risco": contexto.get("nivel_risco", "normal"),
+        "caminho_relatorio": state.get("caminho_relatorio"),
+    }
+
+    resultado = notificacao.enviar_notificacao(payload)
+    return {
+        "notificacao": resultado,
+        "logs": [f"[notificar] status={resultado.get('status')}"],
     }
 
 

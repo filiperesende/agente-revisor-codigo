@@ -57,6 +57,9 @@ class ReviewState(TypedDict, total=False):
     relatorio_markdown: str
     caminho_relatorio: str
 
+    # --- Integração externa (tool de notificação via webhook) ---
+    notificacao: dict
+
     # --- Diagnóstico (lista acumulável com reducer `add`) ---
     logs: Annotated[list[str], add]
     erros: Annotated[list[str], add]

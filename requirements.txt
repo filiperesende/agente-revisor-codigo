@@ -3,5 +3,9 @@ langchain-core==1.4.9
 langchain-google-genai==4.2.7
 python-dotenv==1.2.2
 
+# Integração externa (tool de notificação via webhook) e validação de schema
+requests==2.34.2
+pydantic==2.13.4
+
 # Testes
 pytest==8.3.4
