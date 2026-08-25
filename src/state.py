@@ -36,6 +36,10 @@ class ReviewState(TypedDict, total=False):
     # --- Entrada ---
     caminho_arquivo: str
 
+    # --- Observabilidade (correlaciona logs e métricas) ---
+    run_id: str
+    metricas: dict
+
     # --- Preenchido pela leitura/validação ---
     codigo_fonte: str
     valido: bool
