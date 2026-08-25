@@ -57,6 +57,9 @@ class ReviewState(TypedDict, total=False):
     relatorio_markdown: str
     caminho_relatorio: str
 
+    # --- Governança / aprovação humana ---
+    aprovacao_concedida: bool
+
     # --- Integração externa (tool de notificação via webhook) ---
     notificacao: dict
 

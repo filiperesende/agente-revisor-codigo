@@ -93,12 +93,17 @@ def construir_agente():
     return grafo.compile()
 
 
-def revisar_arquivo(caminho_arquivo: str) -> ReviewState:
+def revisar_arquivo(caminho_arquivo: str, aprovacao_concedida: bool = False) -> ReviewState:
     """
     Executa o agente para um arquivo e devolve o estado final.
 
-    Ponto de entrada de alto nível usado pela CLI e pelos testes.
+    Ponto de entrada de alto nível usado pela CLI e pelos testes. O parâmetro
+    `aprovacao_concedida` permite pré-autorizar ações que exigem aprovação
+    humana (ex.: notificação externa em caso de risco alto).
     """
     agente = construir_agente()
-    estado_inicial: ReviewState = {"caminho_arquivo": caminho_arquivo}
+    estado_inicial: ReviewState = {
+        "caminho_arquivo": caminho_arquivo,
+        "aprovacao_concedida": aprovacao_concedida,
+    }
     return agente.invoke(estado_inicial)
