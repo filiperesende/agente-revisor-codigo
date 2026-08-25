@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from . import analise_estatica, llm, notificacao, policy
+from . import analise_estatica, llm, memoria, notificacao, policy
 from .state import ReviewState
 from .tools import (
     FerramentaError,
@@ -79,6 +79,55 @@ def preparar_contexto(state: ReviewState) -> dict:
         "logs": [f"[preparar_contexto] linguagem={contexto['linguagem']}, "
                  f"linhas={contexto['total_linhas']}"],
     }
+
+
+def recuperar_memoria(state: ReviewState) -> dict:
+    """
+    Nó de memória — recupera a última revisão do mesmo arquivo (contexto).
+
+    Carrega, do histórico persistente, o resultado da revisão anterior deste
+    arquivo. Essa informação é usada mais adiante para comparar o que mudou
+    (achados/risco) e enriquecer o relatório.
+    """
+    contexto = dict(state.get("contexto", {}))
+    caminho = state.get("caminho_arquivo", "")
+
+    anterior = memoria.recuperar_ultima_revisao(caminho)
+    if anterior:
+        contexto["revisao_anterior"] = anterior
+        log = (
+            f"[recuperar_memoria] revisão anterior de {anterior.get('timestamp')} "
+            f"recuperada (achados={anterior.get('total_achados')})"
+        )
+    else:
+        log = "[recuperar_memoria] sem revisão anterior para este arquivo"
+
+    return {"contexto": contexto, "logs": [log]}
+
+
+def registrar_memoria(state: ReviewState) -> dict:
+    """
+    Nó de memória — persiste a revisão atual no histórico.
+
+    Grava os totais consolidados da execução para que futuras revisões deste
+    arquivo possam recuperá-los e comparar a evolução.
+    """
+    contexto = state.get("contexto", {})
+    registro = {
+        "arquivo": contexto.get("caminho_arquivo") or state.get("caminho_arquivo", ""),
+        "linguagem": contexto.get("linguagem", "Desconhecida"),
+        "total_achados": contexto.get("total_achados", len(state.get("achados", []))),
+        "por_severidade": contexto.get("por_severidade", {}),
+        "nivel_risco": contexto.get("nivel_risco", "normal"),
+        "motor_analise": contexto.get("motor_analise", "desconhecido"),
+    }
+    try:
+        memoria.registrar_revisao(registro)
+        log = "[registrar_memoria] revisão registrada no histórico"
+    except OSError as exc:
+        log = f"[registrar_memoria] falha ao registrar histórico: {exc}"
+
+    return {"logs": [log]}
 
 
 def analisar_com_ia(state: ReviewState) -> dict:
@@ -215,6 +264,11 @@ def gerar_relatorio(state: ReviewState) -> dict:
         f"- Origem: IA={contexto.get('achados_ia', 0)} | "
         f"estática={contexto.get('achados_estatica', 0)}",
         "",
+    ])
+
+    linhas.extend(_secao_comparacao(contexto.get("revisao_anterior"), total, nivel_risco))
+
+    linhas.extend([
         "## Detalhes",
         "",
     ])
@@ -311,6 +365,40 @@ def notificar_node(state: ReviewState) -> dict:
         "notificacao": resultado,
         "logs": [f"[notificar] status={resultado.get('status')}"],
     }
+
+
+def _secao_comparacao(anterior: dict | None, total_atual: int, risco_atual: str) -> list[str]:
+    """
+    Monta a seção "Comparação com a revisão anterior" do relatório.
+
+    Usa a revisão recuperada da memória para mostrar o que mudou desde a última
+    execução (delta de achados e mudança de nível de risco). Se não houver
+    revisão anterior, informa que é a primeira.
+    """
+    if not anterior:
+        return ["## Comparação com a revisão anterior", "",
+                "Primeira revisão registrada para este arquivo.", ""]
+
+    total_ant = anterior.get("total_achados", 0)
+    risco_ant = anterior.get("nivel_risco", "normal")
+    delta = total_atual - total_ant
+    tendencia = "estável"
+    if delta > 0:
+        tendencia = f"⬆️ +{delta} (piorou)"
+    elif delta < 0:
+        tendencia = f"⬇️ {delta} (melhorou)"
+
+    linhas = [
+        "## Comparação com a revisão anterior", "",
+        f"- Revisão anterior: {anterior.get('timestamp', 'N/A')}",
+        f"- Achados: {total_ant} → {total_atual} ({tendencia})",
+    ]
+    if risco_ant != risco_atual:
+        linhas.append(f"- Nível de risco: {risco_ant.upper()} → {risco_atual.upper()}")
+    else:
+        linhas.append(f"- Nível de risco: {risco_atual.upper()} (sem mudança)")
+    linhas.append("")
+    return linhas
 
 
 def rota_apos_validacao(state: ReviewState) -> str:
