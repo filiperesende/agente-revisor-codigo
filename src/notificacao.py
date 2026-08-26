@@ -151,7 +151,11 @@ def enviar_notificacao(
         try:
             resp = requests.post(url, json=corpo, timeout=timeout)
             if resp.status_code in (200, 204):
-                return {"status": "enviado", "tentativas": tentativa, "http_status": resp.status_code}
+                return {
+                    "status": "enviado",
+                    "tentativas": tentativa,
+                    "http_status": resp.status_code,
+                }
             # 429 (rate limit) e 5xx são transitórios: vale tentar de novo.
             ultimo_erro = f"HTTP {resp.status_code}"
             if resp.status_code not in (429, 500, 502, 503, 504):
