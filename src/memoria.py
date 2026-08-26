@@ -37,7 +37,7 @@ CAMPOS = (
 )
 
 
-def registrar_revisao(registro: dict, caminho: Path = ARQUIVO_HISTORICO) -> None:
+def registrar_revisao(registro: dict, caminho: Path | None = None) -> None:
     """
     Acrescenta um registro de revisão ao histórico (append-only).
 
@@ -45,6 +45,7 @@ def registrar_revisao(registro: dict, caminho: Path = ARQUIVO_HISTORICO) -> None
     devem interromper o agente, então erros de I/O são propagados apenas se
     o chamador quiser tratá-los.
     """
+    caminho = caminho or ARQUIVO_HISTORICO
     registro = {**registro}
     registro.setdefault("timestamp", datetime.now().isoformat(timespec="seconds"))
     # Mantém apenas os campos previstos, em ordem estável.
@@ -55,8 +56,9 @@ def registrar_revisao(registro: dict, caminho: Path = ARQUIVO_HISTORICO) -> None
         f.write(json.dumps(linha, ensure_ascii=False) + "\n")
 
 
-def _ler_registros(caminho: Path = ARQUIVO_HISTORICO) -> list[dict]:
+def _ler_registros(caminho: Path | None = None) -> list[dict]:
     """Lê todos os registros válidos do histórico, ignorando linhas corrompidas."""
+    caminho = caminho or ARQUIVO_HISTORICO
     if not caminho.exists():
         return []
     registros = []
@@ -72,7 +74,7 @@ def _ler_registros(caminho: Path = ARQUIVO_HISTORICO) -> list[dict]:
 
 
 def recuperar_ultima_revisao(
-    arquivo: str, caminho: Path = ARQUIVO_HISTORICO
+    arquivo: str, caminho: Path | None = None
 ) -> dict | None:
     """Recupera o registro mais recente de revisão para um dado arquivo."""
     anteriores = [r for r in _ler_registros(caminho) if r.get("arquivo") == arquivo]
@@ -80,7 +82,7 @@ def recuperar_ultima_revisao(
 
 
 def recuperar_historico(
-    arquivo: str, limite: int = 10, caminho: Path = ARQUIVO_HISTORICO
+    arquivo: str, limite: int = 10, caminho: Path | None = None
 ) -> list[dict]:
     """
     Recupera os últimos `limite` registros de um arquivo (mais antigos -> recentes).
