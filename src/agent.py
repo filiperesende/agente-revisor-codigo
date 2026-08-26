@@ -10,11 +10,13 @@ from __future__ import annotations
 
 from langgraph.graph import END, START, StateGraph
 
+from .observability import instrumentar, novo_run_id
 from .nodes import (
     analisar_com_ia,
     analisar_estatico,
     consolidar_achados,
     escrever_relatorio_node,
+    finalizar_node,
     gerar_relatorio,
     notificar_node,
     preparar_contexto,
@@ -42,22 +44,27 @@ def construir_agente():
           analisar_com_ia / analisar_estatico
              --> consolidar_achados   (fan-in)
              --(condicional 2)--> priorizar_achados | gerar_relatorio
-          gerar_relatorio -> escrever_relatorio -> registrar_memoria -> notificar -> END
+          gerar_relatorio -> escrever_relatorio -> registrar_memoria
+             -> notificar -> finalizar -> END
     """
     grafo = StateGraph(ReviewState)
 
     # --- Nós (etapas principais do processo) ---
-    grafo.add_node("validar_entrada", validar_entrada)
-    grafo.add_node("preparar_contexto", preparar_contexto)
-    grafo.add_node("recuperar_memoria", recuperar_memoria)
-    grafo.add_node("analisar_com_ia", analisar_com_ia)
-    grafo.add_node("analisar_estatico", analisar_estatico)
-    grafo.add_node("consolidar_achados", consolidar_achados)
-    grafo.add_node("priorizar_achados", priorizar_achados)
-    grafo.add_node("gerar_relatorio", gerar_relatorio)
-    grafo.add_node("escrever_relatorio", escrever_relatorio_node)
-    grafo.add_node("registrar_memoria", registrar_memoria)
-    grafo.add_node("notificar", notificar_node)
+    # Cada nó é instrumentado para emitir logs estruturados e métricas de latência.
+    grafo.add_node("validar_entrada", instrumentar("validar_entrada", validar_entrada))
+    grafo.add_node("preparar_contexto", instrumentar("preparar_contexto", preparar_contexto))
+    grafo.add_node("recuperar_memoria", instrumentar("recuperar_memoria", recuperar_memoria))
+    grafo.add_node("analisar_com_ia", instrumentar("analisar_com_ia", analisar_com_ia))
+    grafo.add_node("analisar_estatico", instrumentar("analisar_estatico", analisar_estatico))
+    grafo.add_node("consolidar_achados", instrumentar("consolidar_achados", consolidar_achados))
+    grafo.add_node("priorizar_achados", instrumentar("priorizar_achados", priorizar_achados))
+    grafo.add_node("gerar_relatorio", instrumentar("gerar_relatorio", gerar_relatorio))
+    grafo.add_node("escrever_relatorio", instrumentar("escrever_relatorio", escrever_relatorio_node))
+    grafo.add_node("registrar_memoria", instrumentar("registrar_memoria", registrar_memoria))
+    grafo.add_node("notificar", instrumentar("notificar", notificar_node))
+    # 'finalizar' não é instrumentado: ele faz o flush das métricas e mediria a
+    # si mesmo depois do flush, gerando contagem incorreta e vazamento em memória.
+    grafo.add_node("finalizar", finalizar_node)
 
     # --- Conexões (fluxo do agente) ---
     grafo.add_edge(START, "validar_entrada")
@@ -97,7 +104,8 @@ def construir_agente():
     grafo.add_edge("gerar_relatorio", "escrever_relatorio")
     grafo.add_edge("escrever_relatorio", "registrar_memoria")
     grafo.add_edge("registrar_memoria", "notificar")
-    grafo.add_edge("notificar", END)
+    grafo.add_edge("notificar", "finalizar")
+    grafo.add_edge("finalizar", END)
 
     return grafo.compile()
 
@@ -114,5 +122,6 @@ def revisar_arquivo(caminho_arquivo: str, aprovacao_concedida: bool = False) -> 
     estado_inicial: ReviewState = {
         "caminho_arquivo": caminho_arquivo,
         "aprovacao_concedida": aprovacao_concedida,
+        "run_id": novo_run_id(),
     }
     return agente.invoke(estado_inicial)

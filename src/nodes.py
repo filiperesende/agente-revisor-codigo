@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from . import analise_estatica, llm, memoria, notificacao, policy
+from . import analise_estatica, llm, memoria, notificacao, observability, policy
 from .state import ReviewState
 from .tools import (
     FerramentaError,
@@ -73,6 +73,7 @@ def preparar_contexto(state: ReviewState) -> dict:
         "total_linhas": len(codigo.splitlines()),
         "total_caracteres": len(codigo),
         "iniciado_em": datetime.now().isoformat(timespec="seconds"),
+        "run_id": state.get("run_id", "sem-run-id"),
     }
     return {
         "contexto": contexto,
@@ -399,6 +400,23 @@ def _secao_comparacao(anterior: dict | None, total_atual: int, risco_atual: str)
         linhas.append(f"- Nível de risco: {risco_atual.upper()} (sem mudança)")
     linhas.append("")
     return linhas
+
+
+def finalizar_node(state: ReviewState) -> dict:
+    """
+    Nó final — consolida as métricas de latência da execução.
+
+    Faz o flush do resumo de métricas (segundo sinal de observabilidade) para
+    `logs/metricas.jsonl` e guarda o resumo no estado para exibição na CLI.
+    """
+    run_id = state.get("run_id", "sem-run-id")
+    resumo = observability.flush_metricas(run_id)
+    return {
+        "metricas": resumo,
+        "logs": [
+            f"[finalizar] run_id={run_id} latencia_total_ms={resumo.get('latencia_total_ms')}"
+        ],
+    }
 
 
 def rota_apos_validacao(state: ReviewState) -> str:

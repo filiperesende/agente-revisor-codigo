@@ -90,6 +90,14 @@ def main(argv: list[str]) -> int:
         print(f"\n✅ Relatório salvo em: {estado['caminho_relatorio']}")
 
     _tratar_notificacao(estado)
+
+    metricas = estado.get("metricas") or {}
+    if metricas:
+        print(
+            f"\n📊 run_id={metricas.get('run_id')} | "
+            f"latência total: {metricas.get('latencia_total_ms')} ms "
+            f"({metricas.get('total_nos')} nós) | logs: logs/agent.jsonl"
+        )
     return 0
 
 

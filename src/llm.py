@@ -16,6 +16,8 @@ import os
 import re
 from pathlib import Path
 
+from . import observability
+
 CAMINHO_PROMPT = Path(__file__).parent / "prompts" / "revisao_codigo.md"
 
 # Modelo padrão. Pode ser sobrescrito pela variável de ambiente GEMINI_MODEL,
@@ -102,6 +104,8 @@ def analisar_com_gemini(codigo: str, contexto: dict) -> list[dict]:
         model=obter_modelo(),
         google_api_key=_obter_chave_api(),
         temperature=0,
+        timeout=30,       # timeout por chamada (resiliência)
+        max_retries=2,    # retry limitado em falhas transitórias
     )
     resposta = modelo.invoke(prompt)
     return _extrair_json(_texto_da_resposta(resposta.content))
@@ -160,9 +164,14 @@ def analisar_codigo(codigo: str, contexto: dict) -> tuple[list[dict], str]:
     Retorna (achados, motor_utilizado). Se o Gemini falhar em tempo de
     execução, cai para o mock para não interromper o fluxo do agente.
     """
+    run_id = contexto.get("run_id", "sem-run-id")
     if usando_gemini():
         try:
             return analisar_com_gemini(codigo, contexto), "gemini"
-        except Exception:  # noqa: BLE001 — fallback resiliente e documentado
+        except Exception as exc:  # noqa: BLE001 — fallback resiliente e documentado
+            observability.log_evento(
+                run_id, "analisar_com_ia", "fallback_llm", nivel="WARNING",
+                erro=f"{type(exc).__name__}: {exc}", motor="mock",
+            )
             return analisar_com_mock(codigo, contexto), "mock (fallback após erro no Gemini)"
     return analisar_com_mock(codigo, contexto), "mock (sem chave de API)"
