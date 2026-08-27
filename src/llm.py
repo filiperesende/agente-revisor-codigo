@@ -157,6 +157,34 @@ def analisar_com_mock(codigo: str, contexto: dict) -> list[dict]:
     return achados
 
 
+def explicar(prompt: str) -> tuple[str | None, str]:
+    """
+    Chamada geral ao LLM para explicar um texto (ex.: logs de CI).
+
+    Retorna (texto, motor). Se não houver Gemini ou a chamada falhar, retorna
+    (None, motor) para que o chamador use uma explicação heurística de fallback.
+    """
+    if usando_gemini():
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+
+            modelo = ChatGoogleGenerativeAI(
+                model=obter_modelo(),
+                google_api_key=_obter_chave_api(),
+                temperature=0,
+                timeout=30,
+                max_retries=2,
+            )
+            return _texto_da_resposta(modelo.invoke(prompt).content), "gemini"
+        except Exception as exc:  # noqa: BLE001 — fallback resiliente
+            observability.log_evento(
+                "devops", "explicar", "fallback_llm", nivel="WARNING",
+                erro=f"{type(exc).__name__}: {exc}",
+            )
+            return None, "mock (fallback após erro no Gemini)"
+    return None, "mock (sem chave de API)"
+
+
 def analisar_codigo(codigo: str, contexto: dict) -> tuple[list[dict], str]:
     """
     Ponto de entrada da análise. Escolhe Gemini ou mock automaticamente.

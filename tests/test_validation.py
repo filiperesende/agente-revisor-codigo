@@ -5,7 +5,7 @@ Cobrem o critério de "validação básica": rejeição de entrada malformada e
 normalização defensiva da saída do LLM antes de gerar o relatório.
 """
 
-from src.validation import validar_caminho_entrada, normalizar_achados
+from src.validation import normalizar_achados, validar_caminho_entrada
 
 
 class TestValidarCaminhoEntrada:

@@ -8,8 +8,8 @@ o que já foi analisado e o que ainda falta produzir.
 
 from __future__ import annotations
 
-from typing import Annotated, TypedDict
 from operator import add
+from typing import Annotated, TypedDict
 
 
 class Achado(TypedDict):

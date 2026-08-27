@@ -18,8 +18,10 @@ Os arquivos de log são dados de runtime e NÃO são versionados (logs/ no
 
 from __future__ import annotations
 
+import functools
 import json
 import threading
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -32,10 +34,6 @@ ARQUIVO_METRICAS = DIRETORIO_LOGS / "metricas.jsonl"
 # nós paralelos do grafo podem escrever ao mesmo tempo.
 _METRICAS: dict[str, list[dict]] = {}
 _LOCK = threading.Lock()
-
-
-import functools
-import time
 
 
 def novo_run_id() -> str:

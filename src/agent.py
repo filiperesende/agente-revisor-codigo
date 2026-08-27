@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from langgraph.graph import END, START, StateGraph
 
-from .observability import instrumentar, novo_run_id
 from .nodes import (
     analisar_com_ia,
     analisar_estatico,
@@ -27,6 +26,7 @@ from .nodes import (
     rota_apos_validacao,
     validar_entrada,
 )
+from .observability import instrumentar, novo_run_id
 from .state import ReviewState
 
 
