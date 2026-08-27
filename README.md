@@ -32,8 +32,7 @@ Este projeto **evolui** o mini-projeto do módulo. Foram **mantidos** o núcleo 
 grafo LangGraph, as ferramentas de arquivo e o fallback mock. Foram
 **refatorados/adicionados**: paralelização e nova ramificação condicional no
 grafo, tool externa (webhook), memória persistente, governança e defesa contra
-prompt injection, observabilidade, QA com IA, pipeline de CI e automação
-low-code.
+prompt injection, observabilidade, QA com IA e pipeline de CI.
 
 ## 2. Classificação e arquitetura
 
@@ -142,9 +141,6 @@ python run_review.py examples/exemplo_com_bugs.py
 
 # pré-aprovar o envio externo (não interativo)
 python run_review.py examples/exemplo_com_bugs.py --aprovar
-
-# saída em JSON (consumida pela automação low-code)
-python run_review.py examples/exemplo_com_bugs.py --json
 ```
 
 Testes e lint:
@@ -173,24 +169,7 @@ ruff check src tests
   a partir do histórico. Evidências em `docs/qa/analise-logs-ia.md` e
   `docs/qa/anomalia-e-risco.md`.
 
-## 8. Automação low-code/no-code (n8n)
-
-Fluxo visual no **n8n** que orquestra a solução (a lógica principal permanece na
-aplicação):
-
-```
-[Agenda diária] → [Execute Command: run_review --json] → [Parse JSON]
-   → [IF risco alto] → [HTTP POST no Discord]
-```
-
-- **Gatilho:** agendamento (executável manualmente para demo).
-- **Integração:** roda o próprio agente e captura a saída `--json`.
-- **Saída observável:** alerta no Discord quando o risco é alto.
-
-Workflow importável: `automacao/n8n-workflow-revisao.json`. Instruções de
-reprodução (recomenda-se `npx n8n` no host): `docs/evidencias/low-code.md`.
-
-## 9. Cenários de uso
+## 8. Cenários de uso
 
 **Cenário 1 — fluxo principal (arquivo com bugs).**
 Entrada: `examples/exemplo_com_bugs.py`. Comportamento: o agente detecta
@@ -210,7 +189,7 @@ problema de segurança (não obedece), **não vaza** o segredo do arquivo e
 **bloqueia** o envio externo por falta de aprovação. Evidência:
 `docs/evidencias/prompt-injection.md`.
 
-## 10. Análise crítica, refinamento e limitações
+## 9. Análise crítica, refinamento e limitações
 
 - **Refinamento documentado** (problema → alteração → resultado):
   `docs/refinamento.md`. Destaque: o Gemini caía sempre no fallback; a
@@ -224,7 +203,7 @@ problema de segurança (não obedece), **não vaza** o segredo do arquivo e
   - Não executa o código analisado (revisão estática).
   - O modo mock detecta apenas padrões simples.
 - **Evoluções futuras:** cache por hash de arquivo, revisão de diffs/PRs,
-  execução assíncrona e endpoint HTTP para integração direta com o low-code.
+  execução assíncrona e um endpoint HTTP para integração com outros serviços.
 
 ---
 
@@ -239,8 +218,6 @@ agente-revisor-codigo/
 ├── conftest.py                # fixture de isolamento dos testes
 ├── .env.example               # nomes das variáveis (sem valores)
 ├── .github/workflows/ci.yml   # pipeline CI (lint + testes + build)
-├── automacao/
-│   └── n8n-workflow-revisao.json
 ├── src/
 │   ├── state.py               # estado compartilhado (memória curta)
 │   ├── tools.py               # ferramentas de arquivo
@@ -262,7 +239,7 @@ agente-revisor-codigo/
 ├── docs/
 │   ├── refinamento.md
 │   ├── qa/                    # code review IA, priorização, logs, anomalia/risco
-│   └── evidencias/            # prompt injection, observabilidade, low-code
+│   └── evidencias/            # prompt injection, observabilidade
 ├── data/                      # histórico (runtime, não versionado)
 ├── logs/                      # logs e métricas (runtime, não versionado)
 └── reports/                   # relatórios (runtime, não versionado)
