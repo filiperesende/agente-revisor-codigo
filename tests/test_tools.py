@@ -10,11 +10,11 @@ import pytest
 
 from src import tools
 from src.tools import (
+    TAMANHO_MAXIMO_BYTES,
     FerramentaError,
     detectar_linguagem,
-    ler_arquivo_codigo,
     escrever_relatorio,
-    TAMANHO_MAXIMO_BYTES,
+    ler_arquivo_codigo,
 )
 
 

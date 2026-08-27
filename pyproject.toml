@@ -1,0 +1,16 @@
+[tool.ruff]
+# Comprimento de linha coerente com a regra da própria análise estática.
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# Conjunto de regras: erros (E), pyflakes (F), warnings (W), imports (I),
+# bugbear (B) e comprehensions (C4). Objetivo e sem excesso.
+select = ["E", "F", "W", "I", "B", "C4"]
+ignore = [
+    "E501",  # comprimento de linha é tratado pelo formatter/regra própria
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Exemplos contêm código propositalmente problemático para demonstração.
+"examples/*" = ["F821", "B", "E722", "F841"]
