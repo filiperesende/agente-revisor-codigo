@@ -19,6 +19,7 @@ de enviar; a opção segura por padrão é NÃO enviar.
 
 from __future__ import annotations
 
+import json
 import sys
 
 from dotenv import load_dotenv
@@ -52,17 +53,23 @@ def main(argv: list[str]) -> int:
     flags = {a for a in argv[1:] if a.startswith("--")}
 
     if not args:
-        print("Uso: python run_review.py <caminho_do_arquivo> [--aprovar]")
+        print("Uso: python run_review.py <caminho_do_arquivo> [--aprovar] [--json]")
         return 2
 
     caminho = args[0]
     auto_aprovar = "--aprovar" in flags
+    formato_json = "--json" in flags
 
-    motor = "Gemini (real)" if usando_gemini() else "Mock (heurístico, sem chave)"
-    print(f"🔎 Revisando: {caminho}")
-    print(f"⚙️  Motor de análise: {motor}\n")
+    if not formato_json:
+        motor = "Gemini (real)" if usando_gemini() else "Mock (heurístico, sem chave)"
+        print(f"🔎 Revisando: {caminho}")
+        print(f"⚙️  Motor de análise: {motor}\n")
 
     estado = revisar_arquivo(caminho, aprovacao_concedida=auto_aprovar)
+
+    # Modo máquina: imprime só JSON (consumido por automações, ex.: n8n).
+    if formato_json:
+        return _saida_json(estado)
 
     # Validação falhou: mostra os erros e encerra com código != 0.
     if not estado.get("valido", False):
@@ -99,6 +106,24 @@ def main(argv: list[str]) -> int:
             f"({metricas.get('total_nos')} nós) | logs: logs/agent.jsonl"
         )
     return 0
+
+
+def _saida_json(estado) -> int:
+    """Imprime um resumo da revisão em JSON puro (para automações low-code)."""
+    contexto = estado.get("contexto", {})
+    resultado = {
+        "valido": estado.get("valido", False),
+        "run_id": estado.get("run_id"),
+        "arquivo": contexto.get("caminho_arquivo") or estado.get("caminho_arquivo"),
+        "linguagem": contexto.get("linguagem"),
+        "total_achados": contexto.get("total_achados", len(estado.get("achados", []))),
+        "por_severidade": contexto.get("por_severidade", {}),
+        "nivel_risco": contexto.get("nivel_risco", "normal"),
+        "caminho_relatorio": estado.get("caminho_relatorio"),
+        "erros": estado.get("erros", []),
+    }
+    print(json.dumps(resultado, ensure_ascii=False))
+    return 0 if resultado["valido"] else 1
 
 
 def _tratar_notificacao(estado) -> None:
