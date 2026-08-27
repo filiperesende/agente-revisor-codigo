@@ -1,165 +1,230 @@
 # Agente Revisor de Código (LangGraph + Gemini)
 
-Agente de IA que automatiza a **revisão de código-fonte**. Ele recebe um
-arquivo de código, analisa em busca de problemas (bugs, segurança, performance
-e estilo) e gera um **relatório estruturado em Markdown** com severidade,
-localização e sugestão de correção para cada problema.
+Agente de IA que automatiza a **revisão de código-fonte**. Recebe um arquivo de
+código, analisa em busca de problemas (bugs, segurança, performance e estilo)
+combinando **análise por IA** (Google Gemini) e **regras determinísticas**, e
+produz um **relatório estruturado em Markdown** com severidade, localização e
+sugestão para cada problema — além de notificar um canal externo quando o risco
+é alto.
 
-Projeto do Mini-Projeto Avaliativo — Módulo 2, disciplina *IA para DEVs*.
+Projeto Avaliativo — **Módulo 2 (M2.2)**, disciplina *IA para Desenvolvedores*.
 
----
-
-## Problema que resolve
-
-Revisar código manualmente é lento e sujeito a esquecimentos. Este agente
-automatiza uma primeira triagem: lê o arquivo, aplica uma análise consistente e
-entrega um relatório pronto para o desenvolvedor, destacando o que é mais
-crítico primeiro.
-
-## Objetivo do agente
-
-- **Entrada:** o caminho de um arquivo de código (ex.: `.py`, `.js`, `.java`).
-- **Processo:** validação → leitura → montagem de contexto → análise por IA →
-  geração e escrita do relatório.
-- **Saída:** um relatório Markdown em `reports/` e um resumo no terminal.
-
-## Por que é um agente
-
-A solução tem **objetivo definido**, mantém **estado/memória** durante a
-execução, **decide o fluxo** (segue ou aborta conforme a validação), usa
-**ferramentas** (ler arquivo e escrever relatório) e produz uma **saída
-estruturada** — as características de um agente.
+> **Vídeo de demonstração (YouTube, não listado):** _adicionar o link aqui_
 
 ---
 
-## Fluxo com LangGraph
+## 1. Descrição da solução
 
-O agente é um `StateGraph` (grafo de estados). Cada nó é uma etapa; as arestas
-ligam as etapas; e uma **aresta condicional** decide se o fluxo continua após a
-validação.
+- **Problema:** revisar código manualmente é lento e sujeito a esquecimentos.
+  O agente faz uma primeira triagem consistente, priorizando o que é mais
+  crítico e mantendo rastreabilidade da execução.
+- **Público:** desenvolvedores, QA e SRE que querem uma revisão automatizada
+  como apoio ao code review.
+- **Entrada:** o caminho de um arquivo de código (`.py`, `.js`, `.java`, etc.).
+- **Saída:** relatório Markdown em `reports/`, resumo no terminal, notificação
+  opcional no Discord e sinais de observabilidade (logs + métricas).
+- **Valor:** triagem rápida e explicável, com governança (aprovação humana para
+  ações externas) e evidências para auditoria.
 
+### Continuidade do mini-projeto (M2.1)
+
+Este projeto **evolui** o mini-projeto do módulo. Foram **mantidos** o núcleo do
+grafo LangGraph, as ferramentas de arquivo e o fallback mock. Foram
+**refatorados/adicionados**: paralelização e nova ramificação condicional no
+grafo, tool externa (webhook), memória persistente, governança e defesa contra
+prompt injection, observabilidade, QA com IA, pipeline de CI e automação
+low-code.
+
+## 2. Classificação e arquitetura
+
+**Classificação: sistema híbrido.** Combina decisões de um **agente** (análise
+por LLM) com um **workflow determinístico** (regras estáticas, política de
+autonomia e roteamento explícito do grafo). A separação entre o que o modelo
+decide e o que é regra fixa é mantida de forma clara.
+
+Fluxo principal (LangGraph `StateGraph`):
+
+```mermaid
+flowchart TD
+    START([início]) --> V[validar_entrada]
+    V -->|entrada inválida| E([END])
+    V -->|entrada válida| P[preparar_contexto]
+    P --> M[recuperar_memoria]
+    M --> IA[analisar_com_ia<br/>LLM Gemini/mock]
+    M --> ST[analisar_estatico<br/>regras determinísticas]
+    IA --> C[consolidar_achados<br/>fan-in + dedupe]
+    ST --> C
+    C -->|risco alto| PR[priorizar_achados]
+    C -->|risco normal| G[gerar_relatorio]
+    PR --> G
+    G --> W[escrever_relatorio]
+    W --> RM[registrar_memoria]
+    RM --> N[notificar<br/>gate de aprovação]
+    N --> F[finalizar<br/>métricas]
+    F --> E([END])
 ```
-        START
-          │
-          ▼
-   validar_entrada ──(entrada inválida)──► END
-          │
-     (entrada válida)
-          ▼
-   preparar_contexto        (calcula linguagem, nº de linhas → memória)
-          ▼
-   analisar_codigo          (chama Gemini ou mock → achados estruturados)
-          ▼
-   gerar_relatorio          (monta o Markdown)
-          ▼
-   escrever_relatorio       (grava o arquivo em reports/)
-          ▼
-         END
-```
 
-| Nó | Responsabilidade | Ferramenta |
-|----|------------------|-----------|
-| `validar_entrada` | valida o caminho e lê o arquivo | leitura de arquivo |
-| `preparar_contexto` | calcula metadados (memória da execução) | — |
-| `analisar_codigo` | envia código ao LLM e normaliza a saída | LLM (Gemini/mock) |
-| `gerar_relatorio` | monta o relatório em Markdown | — |
-| `escrever_relatorio` | grava o relatório em disco | escrita de arquivo |
+Características cobertas: **estado tipado**, execução **sequencial**, **duas
+ramificações condicionais** (validação e risco), **paralelização** (análise IA
+e estática em paralelo com fan-in) e **condição de parada**.
 
-## Ferramenta utilizada
+## 3. Tool e integração
 
-Duas ferramentas controladas (em `src/tools.py`):
+Além das duas ferramentas locais de arquivo (leitura com validação de
+extensão/tamanho e escrita com proteção anti *path traversal*, em
+`src/tools.py`), a solução integra uma **tool externa por webhook**
+(`src/notificacao.py`):
 
-1. **Leitura de arquivo de código** — valida extensão permitida, tamanho máximo
-   (100 KB) e se o arquivo não está vazio antes de ler.
-2. **Escrita de relatório** — grava o Markdown apenas dentro de `reports/`, com
-   proteção contra *path traversal* (usa somente o nome base do arquivo).
+- Envia o resumo da revisão para um **webhook do Discord**.
+- **Validação de schema** com Pydantic antes de enviar.
+- **Proteção anti-SSRF:** só aceita webhooks HTTPS de hosts do Discord.
+- **Resiliência:** `timeout` e `retry` limitado (backoff), com *skip* gracioso
+  quando o webhook não está configurado.
 
-## Contexto / memória
+## 4. Contexto e memória
 
-O estado compartilhado (`src/state.py`) funciona como memória da execução: ele
-acumula o código lido, os metadados calculados (linguagem, nº de linhas), o
-motor de análise usado e os achados. Cada nó lê e enriquece esse estado, que é
-passado adiante até a geração do relatório.
+Duas camadas de memória:
 
-## Validações
+- **Estado compartilhado** (`src/state.py`) — memória de curto prazo da
+  execução: código lido, metadados, achados, `run_id`, etc.
+- **Histórico persistente** (`src/memoria.py`) — `data/historico.jsonl`
+  (armazenamento persistente). A cada revisão o resultado é gravado; na próxima
+  revisão do **mesmo arquivo**, o agente **recupera a anterior** e mostra no
+  relatório o que mudou (delta de achados e mudança de risco). Esse histórico
+  também alimenta a estimativa de tendência/risco (ver seção 7).
 
-- **Entrada:** caminho não vazio, arquivo existente, extensão permitida,
-  tamanho dentro do limite, conteúdo não vazio e UTF-8 válido.
-- **Saída do LLM:** a resposta é normalizada (`src/validation.py`) — itens fora
-  do formato são descartados e severidades inválidas viram `baixa`, evitando
-  que um retorno malformado quebre o relatório.
+## 5. Segurança e autonomia
 
----
+- **Segredos fora do repositório:** chave do Gemini e URL do webhook vêm apenas
+  de variáveis de ambiente; `.env` está no `.gitignore` (só o `.env.example` é
+  versionado).
+- **Política de autonomia** (`src/policy.py`): ações classificadas em
+  *automático*, *aprovação* ou *bloqueado*. A notificação externa exige
+  **aprovação humana** quando o risco é alto; hosts fora do Discord são
+  bloqueados.
+- **Aprovação humana (human-in-the-loop):** com risco alto e sem aprovação, o
+  envio externo fica em `aguardando_aprovacao` e só ocorre após confirmação na
+  CLI (`--aprovar`); o padrão seguro é **não enviar**.
+- **Defesa contra prompt injection:** o prompt trata o código como *dado* (não
+  instrução) e nunca revela segredos; uma regra determinística sinaliza
+  tentativas de injeção como achado de segurança — defesa em profundidade.
+  Evidência: `docs/evidencias/prompt-injection.md`.
 
-## Como executar
+## 6. Instalação e execução
 
-Pré-requisitos: **Python 3.10+** (o projeto foi construído com 3.12).
+Pré-requisitos: **Python 3.10+** (desenvolvido em 3.12).
 
 ```bash
-# 1. Criar e ativar o ambiente virtual
+# 1. Ambiente virtual
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
-# 2. Instalar as dependências
+# 2. Dependências
 pip install -r requirements.txt
 
-# 3. (Opcional) Configurar a chave do Gemini
+# 3. Configuração (opcional) — copie e preencha
 cp .env.example .env
-# edite o .env e coloque sua GOOGLE_API_KEY
-
-# 4. Rodar o agente sobre um arquivo
-python run_review.py examples/exemplo_com_bugs.py
 ```
 
-> Sem a chave do Gemini, o agente roda em **modo mock** (análise por
-> heurísticas), então funciona mesmo offline. Com a chave, usa o Gemini real.
+Variáveis de ambiente (`.env.example`):
 
-## Testes
+| Variável | Descrição |
+|----------|-----------|
+| `GOOGLE_API_KEY` | Chave do Google Gemini. Sem ela, o agente roda em **modo mock**. |
+| `GEMINI_MODEL` | (Opcional) Modelo do Gemini. Padrão: `gemini-3.6-flash`. |
+| `DISCORD_WEBHOOK_URL` | (Opcional) Webhook para notificação. Sem ela, a etapa é pulada. |
 
-Os testes cobrem as validações (`src/validation.py`) e as ferramentas
-(`src/tools.py`), incluindo os limites de segurança (extensão, tamanho e
-proteção contra *path traversal*). Não dependem de chave de API nem de rede.
+Execução:
 
 ```bash
-# com o ambiente virtual ativo e as dependências instaladas
-pytest
+# revisão de um arquivo
+python run_review.py examples/exemplo_com_bugs.py
+
+# pré-aprovar o envio externo (não interativo)
+python run_review.py examples/exemplo_com_bugs.py --aprovar
+
+# saída em JSON (consumida pela automação low-code)
+python run_review.py examples/exemplo_com_bugs.py --json
 ```
 
-## Exemplo de entrada
+Testes e lint:
 
-`examples/exemplo_com_bugs.py` (trecho):
-
-```python
-API_KEY = "sk-1234567890abcdef"   # credencial fixa
-
-def processar(entrada):
-    try:
-        resultado = eval(entrada)  # uso perigoso de eval
-        print(resultado)
-        return resultado
-    except:                        # except genérico
-        pass
+```bash
+pytest              # 44 testes (unitários + integração + E2E)
+ruff check src tests
 ```
 
-## Exemplo de saída
+## 7. QA, observabilidade e DevOps
 
-Resumo no terminal:
+- **Testes:** unitários (`validation`, `tools`), de **integração** (fluxo do
+  grafo) e **E2E** (`tests/test_e2e.py`), todos herméticos (mock, sem rede).
+- **Code review com IA:** o próprio agente revisa código real do projeto
+  (*dogfooding*) e a revisão assistida por IA foi usada em alterações reais —
+  ver `docs/qa/code-review-ia.md` e a priorização por risco em
+  `docs/qa/priorizacao-risco.md`.
+- **Observabilidade (dois sinais correlacionados por `run_id`):** logs
+  estruturados em `logs/agent.jsonl` e métricas de latência em
+  `logs/metricas.jsonl`. Investigação em `docs/evidencias/observabilidade.md`.
+- **Resiliência:** `timeout`/`retry`/`fallback` no LLM e na notificação.
+- **Pipeline CI** (`.github/workflows/ci.yml`): **lint** (ruff) + **testes**
+  (pytest) + **build** (compileall/import).
+- **Anomalia e risco:** `run_devops_analysis.py` usa IA para explicar os logs de
+  duas etapas do CI, detecta a anomalia de latência do nó de IA e estima o risco
+  a partir do histórico. Evidências em `docs/qa/analise-logs-ia.md` e
+  `docs/qa/anomalia-e-risco.md`.
+
+## 8. Automação low-code/no-code (n8n)
+
+Fluxo visual no **n8n** que orquestra a solução (a lógica principal permanece na
+aplicação):
 
 ```
-🔎 Revisando: examples/exemplo_com_bugs.py
-⚙️  Motor de análise: Mock (heurístico, sem chave)
-📄 Linguagem: Python
-📏 Linhas: 29
-🐛 Problemas encontrados: 6
-   [ALTA] linha 3: Possível credencial fixa no código (hardcoded).
-   [ALTA] linha 19: Uso de eval() pode executar código arbitrário.
-   [MEDIA] linha 22: Bloco except genérico captura todos os erros silenciosamente.
-   ...
-✅ Relatório salvo em: reports/review-exemplo_com_bugs-AAAAMMDD-HHMMSS.md
+[Agenda diária] → [Execute Command: run_review --json] → [Parse JSON]
+   → [IF risco alto] → [HTTP POST no Discord]
 ```
 
-O relatório em Markdown lista cada problema com severidade, categoria, linha,
-descrição e sugestão, ordenado da maior para a menor severidade.
+- **Gatilho:** agendamento (executável manualmente para demo).
+- **Integração:** roda o próprio agente e captura a saída `--json`.
+- **Saída observável:** alerta no Discord quando o risco é alto.
+
+Workflow importável: `automacao/n8n-workflow-revisao.json`. Instruções de
+reprodução (recomenda-se `npx n8n` no host): `docs/evidencias/low-code.md`.
+
+## 9. Cenários de uso
+
+**Cenário 1 — fluxo principal (arquivo com bugs).**
+Entrada: `examples/exemplo_com_bugs.py`. Comportamento: o agente detecta
+credencial fixa, `eval`, `except` genérico, etc.; classifica **risco alto**;
+gera o relatório e, com aprovação, notifica o Discord.
+
+```
+🐛 Problemas encontrados: 6 (IA=6, estática=0)
+⚠️  Nível de risco: ALTO — recomenda-se revisão humana.
+✅ Relatório salvo em: reports/review-exemplo_com_bugs-*.md
+```
+
+**Cenário 2 — risco/adversarial (prompt injection).**
+Entrada: `examples/exemplo_prompt_injection.py`, com instruções maliciosas em
+comentários. Comportamento esperado: o agente **reporta** as tentativas como
+problema de segurança (não obedece), **não vaza** o segredo do arquivo e
+**bloqueia** o envio externo por falta de aprovação. Evidência:
+`docs/evidencias/prompt-injection.md`.
+
+## 10. Análise crítica, refinamento e limitações
+
+- **Refinamento documentado** (problema → alteração → resultado):
+  `docs/refinamento.md`. Destaque: o Gemini caía sempre no fallback; a
+  investigação revelou modelo descontinuado + mudança no formato da resposta; a
+  correção tornou o modelo configurável e normalizou a resposta, restaurando a
+  análise real por IA e fortalecendo a defesa contra injeção.
+- **Limitações:**
+  - A chamada ao Gemini está lenta neste endpoint (~1 min) — anomalia conhecida,
+    mitigada por timeout/fallback e monitorada.
+  - Revisa um arquivo por vez (não percorre diretórios).
+  - Não executa o código analisado (revisão estática).
+  - O modo mock detecta apenas padrões simples.
+- **Evoluções futuras:** cache por hash de arquivo, revisão de diffs/PRs,
+  execução assíncrona e endpoint HTTP para integração direta com o low-code.
 
 ---
 
@@ -167,53 +232,44 @@ descrição e sugestão, ordenado da maior para a menor severidade.
 
 ```
 agente-revisor-codigo/
-├── run_review.py            # CLI: ponto de entrada
+├── run_review.py              # CLI principal
+├── run_devops_analysis.py     # análise de DevOps (logs/anomalia/risco)
 ├── requirements.txt
-├── conftest.py              # permite os testes importarem o pacote src
-├── .env.example             # nomes das variáveis (sem valores)
-├── .gitignore               # ignora .env, .venv, reports/
-├── README.md
+├── pyproject.toml             # configuração do ruff (lint)
+├── conftest.py                # fixture de isolamento dos testes
+├── .env.example               # nomes das variáveis (sem valores)
+├── .github/workflows/ci.yml   # pipeline CI (lint + testes + build)
+├── automacao/
+│   └── n8n-workflow-revisao.json
 ├── src/
-│   ├── state.py             # estado compartilhado (memória)
-│   ├── tools.py             # ferramentas: ler arquivo / escrever relatório
-│   ├── llm.py               # Gemini + fallback mock
-│   ├── validation.py        # validação de entrada e saída
-│   ├── nodes.py             # nós do grafo
-│   ├── agent.py             # montagem do StateGraph
-│   └── prompts/
-│       └── revisao_codigo.md
+│   ├── state.py               # estado compartilhado (memória curta)
+│   ├── tools.py               # ferramentas de arquivo
+│   ├── notificacao.py         # tool externa (webhook Discord)
+│   ├── memoria.py             # histórico persistente (memória longa)
+│   ├── policy.py              # política de autonomia
+│   ├── observability.py       # logs estruturados + métricas
+│   ├── devops.py              # anomalia + estimativa de risco
+│   ├── llm.py                 # Gemini + fallback mock
+│   ├── analise_estatica.py    # regras determinísticas + prompt injection
+│   ├── validation.py          # validação de entrada e saída
+│   ├── nodes.py               # nós do grafo
+│   ├── agent.py               # montagem do StateGraph
+│   └── prompts/revisao_codigo.md
 ├── examples/
-│   └── exemplo_com_bugs.py  # entrada de demonstração
-├── tests/
-│   ├── test_validation.py   # testes das validações
-│   └── test_tools.py        # testes das ferramentas
+│   ├── exemplo_com_bugs.py
+│   └── exemplo_prompt_injection.py
+├── tests/                     # unitários + integração + E2E
 ├── docs/
-│   ├── prompts.md           # prompts usados no desenvolvimento
-│   └── apresentacao.pdf     # apresentação (slides)
-└── reports/                 # relatórios gerados (não versionado)
+│   ├── refinamento.md
+│   ├── qa/                    # code review IA, priorização, logs, anomalia/risco
+│   └── evidencias/            # prompt injection, observabilidade, low-code
+├── data/                      # histórico (runtime, não versionado)
+├── logs/                      # logs e métricas (runtime, não versionado)
+└── reports/                   # relatórios (runtime, não versionado)
 ```
 
-## Decisões principais
+## Prompts e modelo
 
-- **LangGraph com aresta condicional** para separar validação do processamento
-  e permitir abortar cedo em entradas inválidas.
-- **Fallback mock** para o LLM: garante que o agente seja demonstrável sem
-  chave de API e torna os testes determinísticos.
-- **Ferramentas com sandbox:** leitura restrita por extensão/tamanho e escrita
-  restrita ao diretório `reports/`.
-- **Segredos fora do código:** a chave é lida apenas de variáveis de ambiente;
-  `.env` está no `.gitignore` e só o `.env.example` é versionado.
-
-## Segurança
-
-- Nenhuma chave, token ou segredo é versionado.
-- `.gitignore` cobre `.env`, `.venv/` e `reports/`.
-- `.env.example` contém apenas os **nomes** das variáveis, sem valores.
-- As ferramentas limitam as ações possíveis (extensões, tamanho, diretório).
-
-## Limitações
-
-- O modo mock detecta apenas padrões simples via regex; a análise profunda
-  depende do Gemini.
-- Revisa um arquivo por vez (não percorre diretórios).
-- Não executa o código analisado — a revisão é estática.
+As instruções de sistema do agente estão em `src/prompts/revisao_codigo.md` (com
+as regras de segurança contra injeção). O modelo é configurável por
+`GEMINI_MODEL`. Prompts usados no desenvolvimento: `docs/prompts.md`.
