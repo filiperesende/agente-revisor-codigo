@@ -1,0 +1,108 @@
+{
+  "name": "Agente Revisor - Revisao Agendada",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "b1a1f001-0001-4001-8001-000000000001",
+      "name": "Agenda diaria (09h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd /CAMINHO/ABSOLUTO/DO/PROJETO && .venv/bin/python run_review.py examples/exemplo_com_bugs.py --json"
+      },
+      "id": "b1a1f001-0002-4001-8001-000000000002",
+      "name": "Rodar Agente Revisor",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $input.first().json.stdout || '{}';\nreturn [{ json: JSON.parse(stdout) }];"
+      },
+      "id": "b1a1f001-0003-4001-8001-000000000003",
+      "name": "Parse JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c0000001-0000-4000-8000-000000000001",
+              "leftValue": "={{ $json.nivel_risco }}",
+              "rightValue": "alto",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1a1f001-0004-4001-8001-000000000004",
+      "name": "Risco alto?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/webhooks/SEU_ID/SEU_TOKEN",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: '🔔 [n8n] Revisao agendada: RISCO ALTO em ' + $json.arquivo + ' (' + $json.total_achados + ' achados). Relatorio: ' + $json.caminho_relatorio }) }}",
+        "options": {}
+      },
+      "id": "b1a1f001-0005-4001-8001-000000000005",
+      "name": "Alerta no Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 220]
+    }
+  ],
+  "connections": {
+    "Agenda diaria (09h)": {
+      "main": [[{ "node": "Rodar Agente Revisor", "type": "main", "index": 0 }]]
+    },
+    "Rodar Agente Revisor": {
+      "main": [[{ "node": "Parse JSON", "type": "main", "index": 0 }]]
+    },
+    "Parse JSON": {
+      "main": [[{ "node": "Risco alto?", "type": "main", "index": 0 }]]
+    },
+    "Risco alto?": {
+      "main": [
+        [{ "node": "Alerta no Discord", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
