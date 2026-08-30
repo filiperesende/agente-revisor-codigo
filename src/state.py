@@ -8,8 +8,8 @@ o que já foi analisado e o que ainda falta produzir.
 
 from __future__ import annotations
 
-from typing import Annotated, TypedDict
 from operator import add
+from typing import Annotated, TypedDict
 
 
 class Achado(TypedDict):
@@ -36,6 +36,10 @@ class ReviewState(TypedDict, total=False):
     # --- Entrada ---
     caminho_arquivo: str
 
+    # --- Observabilidade (correlaciona logs e métricas) ---
+    run_id: str
+    metricas: dict
+
     # --- Preenchido pela leitura/validação ---
     codigo_fonte: str
     valido: bool
@@ -43,12 +47,25 @@ class ReviewState(TypedDict, total=False):
     # --- Contexto / memória da execução ---
     contexto: dict
 
-    # --- Resultado da análise ---
+    # --- Resultado dos ramos paralelos de análise ---
+    # Cada campo é escrito por um único nó (single-writer), evitando conflito
+    # de atualização concorrente durante a paralelização do grafo.
+    achados_ia: list[Achado]        # produzidos pelo LLM (Gemini ou mock)
+    achados_estatica: list[Achado]  # produzidos pela análise determinística
+    motor_analise: str              # motor efetivamente usado pela IA
+
+    # --- Resultado consolidado (fan-in) ---
     achados: list[Achado]
 
     # --- Saída final ---
     relatorio_markdown: str
     caminho_relatorio: str
+
+    # --- Governança / aprovação humana ---
+    aprovacao_concedida: bool
+
+    # --- Integração externa (tool de notificação via webhook) ---
+    notificacao: dict
 
     # --- Diagnóstico (lista acumulável com reducer `add`) ---
     logs: Annotated[list[str], add]

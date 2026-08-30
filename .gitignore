@@ -16,6 +16,10 @@ __pycache__/
 
 # Relatórios gerados em tempo de execução
 reports/
+# Histórico de revisões (memória persistente de runtime)
+data/
+# Logs estruturados e métricas (observabilidade de runtime)
+logs/
 
 # Arquivos de sistema / editor
 .DS_Store

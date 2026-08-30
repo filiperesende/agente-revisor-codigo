@@ -16,8 +16,18 @@ import os
 import re
 from pathlib import Path
 
+from . import observability
+
 CAMINHO_PROMPT = Path(__file__).parent / "prompts" / "revisao_codigo.md"
-MODELO_GEMINI = "gemini-2.0-flash"
+
+# Modelo padrão. Pode ser sobrescrito pela variável de ambiente GEMINI_MODEL,
+# sem alterar o código (requisito 4.10 do projeto).
+MODELO_GEMINI_PADRAO = "gemini-3.6-flash"
+
+
+def obter_modelo() -> str:
+    """Nome do modelo Gemini, configurável por variável de ambiente."""
+    return os.getenv("GEMINI_MODEL", MODELO_GEMINI_PADRAO)
 
 
 def carregar_template_prompt() -> str:
@@ -57,6 +67,27 @@ def _extrair_json(texto: str) -> list[dict]:
         return []
 
 
+def _texto_da_resposta(content) -> str:
+    """
+    Normaliza o conteúdo da resposta do modelo para texto.
+
+    Versões recentes do Gemini retornam o conteúdo como uma lista de blocos
+    (ex.: [{"type": "text", "text": "..."}]) em vez de uma string simples.
+    Esta função extrai o texto em ambos os formatos.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        partes = []
+        for bloco in content:
+            if isinstance(bloco, dict):
+                partes.append(bloco.get("text", ""))
+            elif isinstance(bloco, str):
+                partes.append(bloco)
+        return "".join(partes)
+    return str(content)
+
+
 def analisar_com_gemini(codigo: str, contexto: dict) -> list[dict]:
     """Chama o Gemini para revisar o código e retorna a lista de achados."""
     from langchain_google_genai import ChatGoogleGenerativeAI
@@ -70,12 +101,14 @@ def analisar_com_gemini(codigo: str, contexto: dict) -> list[dict]:
     )
 
     modelo = ChatGoogleGenerativeAI(
-        model=MODELO_GEMINI,
+        model=obter_modelo(),
         google_api_key=_obter_chave_api(),
         temperature=0,
+        timeout=30,       # timeout por chamada (resiliência)
+        max_retries=2,    # retry limitado em falhas transitórias
     )
     resposta = modelo.invoke(prompt)
-    return _extrair_json(resposta.content)
+    return _extrair_json(_texto_da_resposta(resposta.content))
 
 
 def analisar_com_mock(codigo: str, contexto: dict) -> list[dict]:
@@ -124,6 +157,34 @@ def analisar_com_mock(codigo: str, contexto: dict) -> list[dict]:
     return achados
 
 
+def explicar(prompt: str) -> tuple[str | None, str]:
+    """
+    Chamada geral ao LLM para explicar um texto (ex.: logs de CI).
+
+    Retorna (texto, motor). Se não houver Gemini ou a chamada falhar, retorna
+    (None, motor) para que o chamador use uma explicação heurística de fallback.
+    """
+    if usando_gemini():
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+
+            modelo = ChatGoogleGenerativeAI(
+                model=obter_modelo(),
+                google_api_key=_obter_chave_api(),
+                temperature=0,
+                timeout=30,
+                max_retries=2,
+            )
+            return _texto_da_resposta(modelo.invoke(prompt).content), "gemini"
+        except Exception as exc:  # noqa: BLE001 — fallback resiliente
+            observability.log_evento(
+                "devops", "explicar", "fallback_llm", nivel="WARNING",
+                erro=f"{type(exc).__name__}: {exc}",
+            )
+            return None, "mock (fallback após erro no Gemini)"
+    return None, "mock (sem chave de API)"
+
+
 def analisar_codigo(codigo: str, contexto: dict) -> tuple[list[dict], str]:
     """
     Ponto de entrada da análise. Escolhe Gemini ou mock automaticamente.
@@ -131,9 +192,14 @@ def analisar_codigo(codigo: str, contexto: dict) -> tuple[list[dict], str]:
     Retorna (achados, motor_utilizado). Se o Gemini falhar em tempo de
     execução, cai para o mock para não interromper o fluxo do agente.
     """
+    run_id = contexto.get("run_id", "sem-run-id")
     if usando_gemini():
         try:
             return analisar_com_gemini(codigo, contexto), "gemini"
-        except Exception:  # noqa: BLE001 — fallback resiliente e documentado
+        except Exception as exc:  # noqa: BLE001 — fallback resiliente e documentado
+            observability.log_evento(
+                run_id, "analisar_com_ia", "fallback_llm", nivel="WARNING",
+                erro=f"{type(exc).__name__}: {exc}", motor="mock",
+            )
             return analisar_com_mock(codigo, contexto), "mock (fallback após erro no Gemini)"
     return analisar_com_mock(codigo, contexto), "mock (sem chave de API)"
