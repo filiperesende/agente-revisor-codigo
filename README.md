@@ -9,7 +9,7 @@ sugestão para cada problema — além de notificar um canal externo quando o ri
 
 Projeto Avaliativo — **Módulo 2 (M2.2)**, disciplina *IA para Desenvolvedores*.
 
-> **Vídeo de demonstração (YouTube, não listado):** _adicionar o link aqui_
+> **Vídeo de demonstração (YouTube, não listado):** https://youtu.be/C2c89_OGsmI
 
 ---
 
